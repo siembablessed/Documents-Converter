@@ -50,6 +50,16 @@ export default function DocumentConverter() {
     textColor: "#000000",
   })
 
+  const [enhancementSettings, setEnhancementSettings] = useState({
+    brightness: 0,
+    contrast: 0,
+    sharpness: 0,
+    autoEnhance: false,
+    denoiseScanned: false,
+  })
+
+  const [selectedFileForEdit, setSelectedFileForEdit] = useState<string | null>(null)
+
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     setIsDragging(true)
@@ -123,41 +133,50 @@ export default function DocumentConverter() {
       const canvas = document.createElement("canvas")
       const ctx = canvas.getContext("2d")!
 
-      // Set canvas size (A4 proportions)
-      canvas.width = 595
-      canvas.height = 842
+      // Use higher resolution for better text quality (3x scale)
+      const scale = 3
+      canvas.width = 595 * scale
+      canvas.height = 842 * scale
+
+      // Scale the context to match
+      ctx.scale(scale, scale)
+
+      // Enable high-quality text rendering
+      ctx.textBaseline = "top"
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = "high"
 
       // Background
       ctx.fillStyle = coverPageData.backgroundColor
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.fillRect(0, 0, 595, 842)
 
-      // Text styling
+      // Text styling with better antialiasing
       ctx.fillStyle = coverPageData.textColor
       ctx.textAlign = "center"
 
-      // Title
-      ctx.font = "bold 36px Arial"
-      ctx.fillText(coverPageData.title, canvas.width / 2, 200)
+      // Title with better font rendering
+      ctx.font = "bold 36px 'Segoe UI', Arial, sans-serif"
+      ctx.fillText(coverPageData.title, 595 / 2, 200)
 
       // Subtitle
       if (coverPageData.subtitle) {
-        ctx.font = "24px Arial"
-        ctx.fillText(coverPageData.subtitle, canvas.width / 2, 250)
+        ctx.font = "24px 'Segoe UI', Arial, sans-serif"
+        ctx.fillText(coverPageData.subtitle, 595 / 2, 250)
       }
 
       // Author
       if (coverPageData.author) {
-        ctx.font = "18px Arial"
-        ctx.fillText(`By: ${coverPageData.author}`, canvas.width / 2, 350)
+        ctx.font = "18px 'Segoe UI', Arial, sans-serif"
+        ctx.fillText(`By: ${coverPageData.author}`, 595 / 2, 350)
       }
 
       // Date
-      ctx.font = "16px Arial"
-      ctx.fillText(coverPageData.date, canvas.width / 2, 400)
+      ctx.font = "16px 'Segoe UI', Arial, sans-serif"
+      ctx.fillText(coverPageData.date, 595 / 2, 400)
 
-      // Description
+      // Description with better text wrapping
       if (coverPageData.description) {
-        ctx.font = "14px Arial"
+        ctx.font = "14px 'Segoe UI', Arial, sans-serif"
         const words = coverPageData.description.split(" ")
         let line = ""
         let y = 500
@@ -168,17 +187,82 @@ export default function DocumentConverter() {
           const testWidth = metrics.width
 
           if (testWidth > 400 && n > 0) {
-            ctx.fillText(line, canvas.width / 2, y)
+            ctx.fillText(line, 595 / 2, y)
             line = words[n] + " "
             y += 20
           } else {
             line = testLine
           }
         }
-        ctx.fillText(line, canvas.width / 2, y)
+        ctx.fillText(line, 595 / 2, y)
       }
 
-      resolve(canvas.toDataURL("image/jpeg", 0.95))
+      resolve(canvas.toDataURL("image/jpeg", 1.0))
+    })
+  }
+
+  const enhanceImage = async (imageData: string, settings: typeof enhancementSettings): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image()
+      img.crossOrigin = "anonymous"
+
+      img.onload = () => {
+        const canvas = document.createElement("canvas")
+        const ctx = canvas.getContext("2d")!
+
+        canvas.width = img.width
+        canvas.height = img.height
+
+        // Apply enhancements
+        ctx.filter = `brightness(${100 + settings.brightness}%) contrast(${100 + settings.contrast}%)`
+
+        if (settings.autoEnhance) {
+          ctx.filter += ` saturate(110%) hue-rotate(2deg)`
+        }
+
+        ctx.drawImage(img, 0, 0)
+
+        // Apply sharpening if needed
+        if (settings.sharpness > 0) {
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          const data = imageData.data
+          const factor = settings.sharpness / 10
+
+          // Simple sharpening kernel
+          for (let i = 0; i < data.length; i += 4) {
+            const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3
+            const enhancement = brightness * factor
+
+            data[i] = Math.min(255, Math.max(0, data[i] + enhancement))
+            data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + enhancement))
+            data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + enhancement))
+          }
+
+          ctx.putImageData(imageData, 0, 0)
+        }
+
+        // Denoise for scanned documents
+        if (settings.denoiseScanned) {
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          const data = imageData.data
+
+          // Simple noise reduction
+          for (let i = 0; i < data.length; i += 4) {
+            const avg = (data[i] + data[i + 1] + data[i + 2]) / 3
+            if (avg < 50) {
+              data[i] = data[i + 1] = data[i + 2] = 0 // Pure black
+            } else if (avg > 200) {
+              data[i] = data[i + 1] = data[i + 2] = 255 // Pure white
+            }
+          }
+
+          ctx.putImageData(imageData, 0, 0)
+        }
+
+        resolve(canvas.toDataURL("image/jpeg", 0.95))
+      }
+
+      img.src = imageData
     })
   }
 
@@ -198,13 +282,25 @@ export default function DocumentConverter() {
         isFirstPage = false
       }
 
-      // Add images
+      // Add images with enhancement
       for (const fileItem of files) {
         if (!isFirstPage) {
           pdf.addPage()
         }
 
-        // Load image and get dimensions
+        // Enhance image if settings are applied
+        let imageData = fileItem.preview
+        if (
+          enhancementSettings.brightness !== 0 ||
+          enhancementSettings.contrast !== 0 ||
+          enhancementSettings.sharpness > 0 ||
+          enhancementSettings.autoEnhance ||
+          enhancementSettings.denoiseScanned
+        ) {
+          imageData = await enhanceImage(fileItem.preview, enhancementSettings)
+        }
+
+        // Load enhanced image and get dimensions
         const img = new Image()
         img.crossOrigin = "anonymous"
 
@@ -239,14 +335,14 @@ export default function DocumentConverter() {
             canvas.height = height
             ctx.drawImage(img, 0, 0)
 
-            const imageData = canvas.toDataURL("image/jpeg", 0.95)
-            pdf.addImage(imageData, "JPEG", x, y, finalWidth, finalHeight)
+            const finalImageData = canvas.toDataURL("image/jpeg", 0.95)
+            pdf.addImage(finalImageData, "JPEG", x, y, finalWidth, finalHeight)
 
             resolve(null)
           }
 
           img.onerror = reject
-          img.src = fileItem.preview
+          img.src = imageData
         })
 
         isFirstPage = false
@@ -407,6 +503,100 @@ export default function DocumentConverter() {
               </Button>
             </CardContent>
           </Card>
+
+          {files.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Image Enhancement</CardTitle>
+                <CardDescription>Improve scanned documents and image quality</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="auto-enhance"
+                    checked={enhancementSettings.autoEnhance}
+                    onCheckedChange={(checked) =>
+                      setEnhancementSettings((prev) => ({ ...prev, autoEnhance: checked as boolean }))
+                    }
+                  />
+                  <Label htmlFor="auto-enhance">Auto enhance</Label>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="denoise-scanned"
+                    checked={enhancementSettings.denoiseScanned}
+                    onCheckedChange={(checked) =>
+                      setEnhancementSettings((prev) => ({ ...prev, denoiseScanned: checked as boolean }))
+                    }
+                  />
+                  <Label htmlFor="denoise-scanned">Denoise scanned docs</Label>
+                </div>
+
+                <div>
+                  <Label htmlFor="brightness">Brightness: {enhancementSettings.brightness}%</Label>
+                  <input
+                    id="brightness"
+                    type="range"
+                    min="-50"
+                    max="50"
+                    value={enhancementSettings.brightness}
+                    onChange={(e) =>
+                      setEnhancementSettings((prev) => ({ ...prev, brightness: Number.parseInt(e.target.value) }))
+                    }
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="contrast">Contrast: {enhancementSettings.contrast}%</Label>
+                  <input
+                    id="contrast"
+                    type="range"
+                    min="-50"
+                    max="50"
+                    value={enhancementSettings.contrast}
+                    onChange={(e) =>
+                      setEnhancementSettings((prev) => ({ ...prev, contrast: Number.parseInt(e.target.value) }))
+                    }
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="sharpness">Sharpness: {enhancementSettings.sharpness}</Label>
+                  <input
+                    id="sharpness"
+                    type="range"
+                    min="0"
+                    max="10"
+                    value={enhancementSettings.sharpness}
+                    onChange={(e) =>
+                      setEnhancementSettings((prev) => ({ ...prev, sharpness: Number.parseInt(e.target.value) }))
+                    }
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                  />
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setEnhancementSettings({
+                      brightness: 0,
+                      contrast: 0,
+                      sharpness: 0,
+                      autoEnhance: false,
+                      denoiseScanned: false,
+                    })
+                  }
+                  className="w-full"
+                >
+                  Reset Enhancements
+                </Button>
+              </CardContent>
+            </Card>
+          )}
 
           {includeCoverPage && (
             <Card>
