@@ -59,6 +59,8 @@ export default function DocumentConverter() {
   })
 
   const [selectedFileForEdit, setSelectedFileForEdit] = useState<string | null>(null)
+  const [currentPage, setCurrentPage] = useState(0)
+  const [selectedImageForView, setSelectedImageForView] = useState<FileItem | null>(null)
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -96,7 +98,9 @@ export default function DocumentConverter() {
 
     setFiles((prev) => {
       const combined = [...prev, ...fileItems]
-      return sortOrder === "name" ? combined.sort((a, b) => a.name.localeCompare(b.name)) : combined
+      const sorted = sortOrder === "name" ? combined.sort((a, b) => a.name.localeCompare(b.name)) : combined
+      resetPagination()
+      return sorted
     })
   }
 
@@ -126,6 +130,29 @@ export default function DocumentConverter() {
     if (sortOrder === "name") {
       setFiles((prev) => [...prev].sort((a, b) => a.name.localeCompare(b.name)))
     }
+  }
+
+  const itemsPerPage = 4
+  const totalPages = Math.ceil(files.length / itemsPerPage)
+  const startIndex = currentPage * itemsPerPage
+  const endIndex = startIndex + itemsPerPage
+  const currentFiles = files.slice(startIndex, endIndex)
+
+  const goToNextPage = () => {
+    if (currentPage < totalPages - 1) {
+      setCurrentPage(currentPage + 1)
+    }
+  }
+
+  const goToPreviousPage = () => {
+    if (currentPage > 0) {
+      setCurrentPage(currentPage - 1)
+    }
+  }
+
+  // Reset to first page when files change
+  const resetPagination = () => {
+    setCurrentPage(0)
   }
 
   const generateCoverPage = async (): Promise<string> => {
@@ -413,6 +440,7 @@ export default function DocumentConverter() {
                           if (value === "name") {
                             sortFiles()
                           }
+                          resetPagination()
                         }}
                       >
                         <SelectTrigger className="w-32">
@@ -430,49 +458,101 @@ export default function DocumentConverter() {
                     <Droppable droppableId="files" isDropDisabled={sortOrder === "name"}>
                       {(provided) => (
                         <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-2">
-                          {files.map((fileItem, index) => (
-                            <Draggable
-                              key={fileItem.id}
-                              draggableId={fileItem.id}
-                              index={index}
-                              isDragDisabled={sortOrder === "name"}
-                            >
-                              {(provided, snapshot) => (
-                                <div
-                                  ref={provided.innerRef}
-                                  {...provided.draggableProps}
-                                  className={`flex items-center gap-3 p-3 border rounded-lg bg-background ${
-                                    snapshot.isDragging ? "shadow-lg" : ""
-                                  }`}
-                                >
-                                  {sortOrder === "custom" && (
-                                    <div {...provided.dragHandleProps} className="cursor-grab active:cursor-grabbing">
-                                      <GripVertical className="w-4 h-4 text-muted-foreground" />
+                          {currentFiles.map((fileItem, index) => {
+                            const actualIndex = startIndex + index
+                            return (
+                              <Draggable
+                                key={fileItem.id}
+                                draggableId={fileItem.id}
+                                index={actualIndex}
+                                isDragDisabled={sortOrder === "name"}
+                              >
+                                {(provided, snapshot) => (
+                                  <div
+                                    ref={provided.innerRef}
+                                    {...provided.draggableProps}
+                                    className={`flex items-center gap-3 p-3 border rounded-lg bg-background ${
+                                      snapshot.isDragging ? "shadow-lg" : ""
+                                    }`}
+                                  >
+                                    {sortOrder === "custom" && (
+                                      <div {...provided.dragHandleProps} className="cursor-grab active:cursor-grabbing">
+                                        <GripVertical className="w-4 h-4 text-muted-foreground" />
+                                      </div>
+                                    )}
+                                    <img
+                                      src={fileItem.preview || "/placeholder.svg"}
+                                      alt={fileItem.name}
+                                      className="w-12 h-12 object-cover rounded border cursor-pointer hover:opacity-80 transition-opacity"
+                                      onClick={() => setSelectedImageForView(fileItem)}
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-medium truncate">{fileItem.name}</p>
+                                      <p className="text-xs text-muted-foreground">
+                                        {(fileItem.file.size / 1024 / 1024).toFixed(2)} MB
+                                      </p>
                                     </div>
-                                  )}
-                                  <img
-                                    src={fileItem.preview || "/placeholder.svg"}
-                                    alt={fileItem.name}
-                                    className="w-12 h-12 object-cover rounded border"
-                                  />
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium truncate">{fileItem.name}</p>
-                                    <p className="text-xs text-muted-foreground">
-                                      {(fileItem.file.size / 1024 / 1024).toFixed(2)} MB
-                                    </p>
+                                    <Button variant="ghost" size="sm" onClick={() => removeFile(fileItem.id)}>
+                                      <X className="w-4 h-4" />
+                                    </Button>
                                   </div>
-                                  <Button variant="ghost" size="sm" onClick={() => removeFile(fileItem.id)}>
-                                    <X className="w-4 h-4" />
-                                  </Button>
-                                </div>
-                              )}
-                            </Draggable>
-                          ))}
+                                )}
+                              </Draggable>
+                            )
+                          })}
                           {provided.placeholder}
                         </div>
                       )}
                     </Droppable>
                   </DragDropContext>
+
+                  {/* Pagination Controls */}
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                      <Button variant="outline" size="sm" onClick={goToPreviousPage} disabled={currentPage === 0}>
+                        Previous
+                      </Button>
+                      <span className="text-sm text-muted-foreground">
+                        Page {currentPage + 1} of {totalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={goToNextPage}
+                        disabled={currentPage === totalPages - 1}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Image Viewer Modal */}
+              {selectedImageForView && (
+                <div
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+                  onClick={() => setSelectedImageForView(null)}
+                >
+                  <div className="relative max-w-4xl max-h-[90vh] p-4">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="absolute top-2 right-2 z-10 bg-black/50 text-white hover:bg-black/70"
+                      onClick={() => setSelectedImageForView(null)}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                    <img
+                      src={selectedImageForView.preview || "/placeholder.svg"}
+                      alt={selectedImageForView.name}
+                      className="max-w-full max-h-full object-contain rounded-lg"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <div className="absolute bottom-2 left-2 bg-black/50 text-white px-3 py-1 rounded text-sm">
+                      {selectedImageForView.name}
+                    </div>
+                  </div>
                 </div>
               )}
             </CardContent>
